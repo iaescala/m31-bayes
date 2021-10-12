@@ -2,20 +2,28 @@
 @author: I.Escala (iescala@carnegiescience.edu)
 
 A Python implentation/modification of feh.pro (E.N. Kirby)
-built for compatability with PARSEC isochrones (CMD v3.3)
+built for compatability with PARSEC isochrones (CMD v3.3 and up, see below)
 and various photomtetric filter sets
 
 Includes an additional option to use AGB isochrones (with fixed stellar age)
 for stars above the TRGB
+
+WARNING: Johnson-Cousins and HST/ACS WFC isochrones from more recent versions
+of CMD input form than other sets -- probably recommended that you
+check that you are using the most recent versions of the PARSEC isochrones
+before usage
 """
 
-from scipy.interpolate import griddata
+from scipy.interpolate import griddata, SmoothBivariateSpline, interp1d, interp2d
+import pickle
 import numpy as np
 import glob
 import sys
+import os
 
 def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec', filter='VI',
-             dm=None, ddm=None, extrap=True, enforce_bounds=False, age=None, check_agb=False):
+             dm=None, ddm=None, extrap=True, enforce_bounds=False, age=None, check_agb=False,
+             root=os.getcwd()):
 
     """
     PURPOSE: Calculate photometric metallicity with PARSEC isochrones.
@@ -50,12 +58,13 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
     enforce_bounds: boolean: If a value of [Fe/H], Teff, or logg that is interpolated
                     based on the isochrones is outside of the range of the isochrones,
                     set the values to NaN. Default is False.
-    age: float, the age of the RGB isochrones to use in Gyr. If None,
+    age: int, the age of the RGB isochrones to use in Gyr. If None,
          return an array with quantities computed for various stellar ages
     check_agb: boolean, whether to check for AGB stars in the data based on
                magnitude above the TRGB, and if
                they are present, use 0.5 Gyr AGB isochrones (instead of RGB)
                for this subset. Default False.
+    root: string, root directory that hosts isochrone data folder
 
     OUTPUTS:
     --------
@@ -122,9 +131,9 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
             err_mag_in = ddm
 
     if age is None:
-        iso_files = glob.glob('isochrones/feh_'+filter+'_*_'+kind+'.dat.txt')
+        iso_files = glob.glob(os.path.join(root, 'isochrones/rgb/feh_'+filter+'_*_'+kind+'.dat'))
     else:
-        iso_files = ['isochrones/feh_'+filter+'_'+str(age)+'_'+kind+'.dat.txt']
+        iso_files = [os.path.join(root,'isochrones/rgb/feh_'+filter+'_'+str(age)+'_'+kind+'.dat')]
 
     nages = len(iso_files)
     nmc = 1000
@@ -163,31 +172,33 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
             usecols = (0,2,6,7,8,9,30,32)
             skiprows = 0
         if filter.lower() == 'hstacswfc':
-            usecols = (0,2,6,7,8,9,26,35)
-            skiprows = 12
+            #usecols = (0,2,6,7,8,9,26,35) CMD v3.3
+            #skiprows = 12
+            usecols = (0,2,6,7,8,9,29,34)
+            skiprows = 0
 
     if check_agb: #If this flag is set to true, check where given stars are AGB stars assuming 12 Gyr RGB isocrhones
 
         wagb_in = np.full((nages, n), False)
         for kk,rgb_file in enumerate(iso_files):
 
-            Zi,_,_,_,_,label, mag_blue, mag_red = np.loadtxt(rgb_file, skiprows=skiprows, unpack=True,
-                                                                    usecols=usecols)
+            Zi,_,_,_,_,label, mag_blue, mag_red = np.loadtxt(rgb_file,
+                                                skiprows=skiprows, unpack=True,usecols=usecols)
 
             Zi_uniq = np.unique(Zi)
             mag_trgb = []
             color_trgb = []
 
-            for ii in range(0, len(Zi_uniq), 20):
+            for ii in range(len(Zi_uniq)):
 
-                wtrgb = (label == 3) & (Zi == Zi_uniq[ii])
-                mag_trgb.append( mag_red[wtrgb][-1] ) # IN ABSOLUTE MAGS
-                color_trgb.append( mag_blue[wtrgb][-1] - mag_red[wtrgb][-1] )
+                wrgb = (label == 3) & (Zi == Zi_uniq[ii])
+                mag_trgb.append( mag_red[wrgb][-1] ) # IN ABSOLUTE MAGS
+                color_trgb.append( mag_blue[wrgb][-1] - mag_red[wrgb][-1] )
 
             if err_mag_in is not None:
-                agb_thresh = np.max([err_mag_in, 0.1])
+                agb_thresh = np.array([np.nanmax([err_mag_in[i], 0.1]) for i in range(mag_in.size)])
             else:
-                agb_thresh = 0.1
+                agb_thresh = np.full(mag_in.size, 0.1)
 
             #Need to calculate it according to every different distance modulus
             wagb_kk = np.full(len(mag_in), False)
@@ -201,7 +212,7 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                 ftrgb = interp1d(color_trgb, mag_trgb, fill_value="extrapolate")
                 trgb = ftrgb(color_in[wdm])
 
-                wagb_kk[wdm] = (mag_in[wdm] - trgb) < -agb_thresh
+                wagb_kk[wdm] = (mag_in[wdm] - trgb) < -agb_thresh[wdm]
 
                 mag_trgb -= dm_uniq[jj]
 
@@ -210,13 +221,16 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
             wagb_in[kk] = wagb_kk
 
-        agb_save_file = 'isochrones/agb/feh_'+filter+'_05_'+kind+'_agb_grid.pkl'
-        if not os.path.exists(agb_save_file):
+        if extrap: agb_save_file = 'isochrones/agb/feh_'+filter+'_05_'+kind+'_agb_grid_extrap.pkl'
+        else: agb_save_file = 'isochrones/agb/feh_'+filter+'_05_'+kind+'_agb_grid.pkl'
+
+        if not os.path.exists(os.path.join(root, agb_save_file)):
 
             #Now build up the AGB grid independently of the RGB grid because need to assume 0.5 Gyr age
-            agb_file = 'isochrones/agb/feh_'+filter+'_05_'+kind+'.dat.txt'
-            Zi, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(agb_file, skiprows=skiprows, unpack=True,
-                                                                         usecols=usecols)
+            agb_file = 'isochrones/agb/feh_'+filter+'_05_'+kind+'.dat'
+            Zi, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(os.path.join(root,agb_file),
+                                                                skiprows=skiprows, unpack=True,
+                                                                usecols=usecols)
 
             Zi_uniq = np.unique(Zi)
             mag_grid_agb = []; clr_grid_agb = []; feh_grid_agb = []
@@ -226,12 +240,43 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
                 wagb = (label == 7) & (Zi == Zi_uniq[ii])
 
-                mag_grid_agb.extend( mag_red[wagb] )
-                clr_grid_agb.extend( mag_blue[wagb] - mag_red[wagb] )
-                feh_grid_agb.extend( np.log10(Zi[wagb]/Zsun) )
-                logt_grid_agb.extend( Te[wagb] )
-                logg_grid_agb.extend( logg[wagb] )
-                logL_grid_agb.extend( logL[wagb] )
+                mag = mag_red[wagb]
+                color = mag_blue[wagb]-mag_red[wagb]
+                feh = np.log10(Zi[wagb]/Zsun)
+                grav = logg[wagb]
+                teff = Te[wagb]
+                lum = logL[wagb]
+
+                if extrap:
+
+                    #Extrapolate beyond the tip of the red giant branch
+                    m, b = np.polyfit(color[-2:], mag[-2:], 1)
+
+                    #Extend the colors redward by 1.2 mags
+                    xx = np.arange(color[-1], color[-1]+1.2, 0.1)
+                    yy = xx*m + b
+
+                    #Fill in this extension with the values for Teff, Logg,
+                    #and [Fe/H] from the TRGB
+                    zz = np.full(len(xx), feh[-1])
+                    gg = np.full(len(xx), grav[-1])
+                    tt = np.full(len(xx), teff[-1])
+                    lll = np.full(len(xx), lum[-1])
+
+                    #Extend the grid with these values
+                    color = np.append(color, xx)
+                    mag = np.append(mag, yy)
+                    feh = np.append(feh, zz)
+                    grav = np.append(grav, gg)
+                    teff = np.append(teff, tt)
+                    lum = np.append(lum, lll)
+
+                mag_grid_agb.extend(mag)
+                clr_grid_agb.extend(color)
+                feh_grid_agb.extend(feh)
+                logg_grid_agb.extend(grav)
+                logt_grid_agb.extend(teff)
+                logL_grid_agb.extend(lum)
 
             mag_grid_agb = np.array(mag_grid_agb)
             clr_grid_agb = np.array(clr_grid_agb)
@@ -243,38 +288,34 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
             agb_dict = {'mag': mag_grid_agb, 'clr': clr_grid_agb, 'feh': feh_grid_agb, 'logt': logt_grid_agb,
                         'logg': logg_grid_agb, 'logL': logL_grid_agb}
 
-            with open(agb_save_file, 'wb') as f:
+            with open(os.path.join(root,agb_save_file), 'wb') as f:
                 pickle.dump(agb_dict, f)
 
         else:
 
-            with open(agb_save_file, 'rb') as f:
+            with open(os.path.join(root,agb_save_file), 'rb') as f:
                 agb_dict = pickle.load(f, encoding='latin1')
 
             mag_grid_agb = agb_dict['mag']; clr_grid_agb = agb_dict['clr']
             feh_grid_agb = agb_dict['feh']; logt_grid_agb = agb_dict['logt']
             logg_grid_agb = agb_dict['logg']; logL_grid_agb = agb_dict['logL']
 
-            plt.figure()
-            plt.hist(logg_grid_agb)
-            plt.show()
-
     ### Now back to the RGB stars
 
     for kk,rgb_file in enumerate(iso_files):
 
-        Zi, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(rgb_file, skiprows=skiprows, unpack=True,
+        Zi, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(rgb_file,
+                                                                         skiprows=skiprows, unpack=True,
                                                                          usecols=usecols)
         if filter == 'hstacswfc' or filter.lower() == 'vi':
             age = 10**age
 
         age_str = str(np.round(np.unique(age)[0]/1.e9, decimals=0))[:-2]
-        print(age_str)
 
-        if not extrap: rgb_save_file = 'isochrones/feh_'+filter.lower()+'_'+age_str+'_'+kind+'_rgb_grid.pkl'
-        else: rgb_save_file = 'isochrones/feh_'+filter.lower()+'_'+age_str+'_'+kind+'_rgb_grid_extrap.pkl'
+        if not extrap: rgb_save_file = 'isochrones/rgb/feh_'+filter.lower()+'_'+age_str+'_'+kind+'_rgb_grid.pkl'
+        else: rgb_save_file = 'isochrones/rgb/feh_'+filter.lower()+'_'+age_str+'_'+kind+'_rgb_grid_extrap.pkl'
 
-        if not os.path.exists(rgb_save_file):
+        if not os.path.exists(os.path.join(root,rgb_save_file)):
 
             feh_val = np.unique(Zi)
 
@@ -333,12 +374,12 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
             rgb_dict = {'mag': mag_grid, 'clr': clr_grid, 'logg': logg_grid, 'logt': logt_grid,
                    'feh': feh_grid, 'logL': logL_grid}
 
-            with open(rgb_save_file, 'wb') as f:
+            with open(os.path.join(root,rgb_save_file), 'wb') as f:
                 pickle.dump(rgb_dict, f)
 
         else:
 
-            with open(rgb_save_file, 'rb') as f:
+            with open(os.path.join(root,rgb_save_file), 'rb') as f:
                 rgb_dict = pickle.load(f, encoding='latin1')
 
             mag_grid = rgb_dict['mag']; clr_grid = rgb_dict['clr']
@@ -409,11 +450,17 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                 #Construct an interpolator that can extrapolate
                 #Note that griddata cannot extrapolate, but it is much more robust than *Spline functions
                 #*Spline functions very dependent on smoothing parameter s and can generate wild swings
-                k = 2
+                k = 1
                 f_t = SmoothBivariateSpline(clr_grid, mag_grid, logt_grid, kx=k, ky=k)
                 f_g = SmoothBivariateSpline(clr_grid, mag_grid, logg_grid, kx=k, ky=k)
                 f_f = SmoothBivariateSpline(clr_grid, mag_grid, feh_grid, kx=k, ky=k)
                 f_l = SmoothBivariateSpline(clr_grid, mag_grid, logL_grid, kx=k, ky=k)
+
+                #f_t = interp2d(clr_grid, mag_grid, logt_grid, fill_value='extrapolate')
+                #f_g = interp2d(clr_grid, mag_grid, logg_grid, fill_value='extrapolate')
+                #f_f = interp2d(clr_grid, mag_grid, feh_grid, fill_value='extrapolate')
+                #f_l = interp2d(clr_grid, mag_grid, logL_grid, fill_value='extrapolate')
+
 
                 #Now construct an interpolator for the AGB stars, if check_agb is True
                 if check_agb:
@@ -421,6 +468,11 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                     f_g_agb = SmoothBivariateSpline(clr_grid_agb, mag_grid_agb, logg_grid_agb, kx=k, ky=k)
                     f_f_agb = SmoothBivariateSpline(clr_grid_agb, mag_grid_agb, feh_grid_agb, kx=k, ky=k)
                     f_l_agb = SmoothBivariateSpline(clr_grid_agb, mag_grid_agb, logL_grid_agb, kx=k, ky=k)
+
+                    #f_t_agb = interp2d(clr_grid_agb, mag_grid_agb, logt_grid_agb, fill_value='extrapolate')
+                    #f_g_agb = interp2d(clr_grid_agb, mag_grid_agb, logg_grid_agb, fill_value='extrapolate')
+                    #f_f_agb = interp2d(clr_grid_agb, mag_grid_agb, feh_grid_agb, fill_value='extrapolate')
+                    #f_l_agb = interp2d(clr_grid_agb, mag_grid_agb, logL_grid_agb, fill_value='extrapolate')
 
                 for ll in arg:
 
