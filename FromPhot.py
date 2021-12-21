@@ -106,9 +106,6 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
     if kind == 'parsec': Zsun = 0.0152
 
-    if err_mag_in is None and err_color_in is None:
-        err_mag_in = np.zeros(len(mag_in)); err_color_in = np.zeros(len(color_in))
-
     if isinstance(mag_in, list) or isinstance(mag_in, np.ndarray):
         pass
     else:
@@ -122,13 +119,25 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
     n = len(mag_in)
     dm_uniq = np.unique(dm)
     ndm = len(dm_uniq)
-    if ndm == 1 and n > 1: dm = np.full(n, dm)
+    if (ndm == 1) and (n > 1): dm = np.full(n, dm)
 
     if ddm is not None:
+
         if err_mag_in is not None:
             err_mag_in = np.sqrt(err_mag_in**2. + ddm**2.)
         else:
-            err_mag_in = ddm
+            if (ndm == 1) and (n > 1):
+                err_mag_in = np.full(n, ddm)
+            else:
+                err_mag_in = ddm
+
+        if err_color_in is None:
+            err_color_in = np.zeros(n)
+
+    #If still None
+    if err_color_in is None and err_mag_in is None:
+        err_color_in = np.full(n, np.nan)
+        err_mag_in = np.full(n, np.nan)
 
     if age is None:
         iso_files = glob.glob(os.path.join(root, 'isochrones/rgb/feh_'+filter+'_*_'+kind+'.dat'))
@@ -145,15 +154,15 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
         phot['color'] = color_in[i]
         phot['err_mag'] = err_mag_in[i]
         phot['err_color'] = err_color_in[i]
-        phot['ages'] = np.full(nages, -999.)
-        phot['feh'] = np.full(nages, -999.)
-        phot['teff'] = np.full(nages, -999.)
-        phot['L'] = np.full(nages, -999.)
-        phot['logg'] = np.full(nages, -999.)
-        phot['err_feh'] = np.full(nages, -999.)
-        phot['err_teff'] = np.full(nages, -999.)
-        phot['err_logg'] = np.full(nages, -999.)
-        phot['err_teff_arr'] = np.full((nages, nmc), -999.)
+        phot['ages'] = np.full(nages, np.nan)
+        phot['feh'] = np.full(nages, np.nan)
+        phot['teff'] = np.full(nages, np.nan)
+        phot['L'] = np.full(nages, np.nan)
+        phot['logg'] = np.full(nages, np.nan)
+        phot['err_feh'] = np.full(nages, np.nan)
+        phot['err_teff'] = np.full(nages, np.nan)
+        phot['err_logg'] = np.full(nages, np.nan)
+        phot['err_teff_arr'] = np.full((nages, nmc), np.nan)
         if check_agb: phot['wagb'] = np.full(nages, False)
         phots[i] = phot
 
@@ -572,18 +581,22 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
             ### NOTE THAT CURRENTLY ERROR CALCULATION IS NOT IMPLEMENTED FOR AGB STARS
 
-            if err_mag_in.all() != 0. and err_color_in.all() != 0.:
+            #if err_mag_in.all() != 0. and err_color_in.all() != 0.:
+            if (err_mag_in is not None) and (err_color_in is not None):
                 for ii in range(len(wdm)):
 
-                    if np.isnan(feh_i[ii]):
-                        phots[wdm[ii]]['err_feh'][kk] = 0.
+                    if np.isnan(err_color_in[wdm[ii]]) or np.isnan(err_mag_in[wdm[ii]]):
+                        continue
 
+                    if np.isnan(feh_i[ii]):
+                        #phots[wdm[ii]]['err_feh'][kk] = np.nan
+                        pass
                     else:
                         rand = np.random.normal(size=(nmc,2))
                         clr_mc = color_in[wdm[ii]] + rand[:,0]*err_color_in[wdm[ii]]
                         mag_mc = mag_in[wdm[ii]] + rand[:,1]*err_mag_in[wdm[ii]]
 
-                        feh_mc = griddata((clr_grid, mag_grid), feh_grid, (clr_mc, mag_mc), fill_value=-999.)
+                        feh_mc = griddata((clr_grid, mag_grid), feh_grid, (clr_mc, mag_mc), fill_value=np.nan)
                         wgood = np.where( (feh_mc >= -5.) & (feh_mc <= 2.) )[0]
 
                         if len(wgood) > 2:
@@ -592,14 +605,14 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                             phots[wdm[ii]]['err_feh'][kk] = np.nan
 
                     if np.isnan(t_i[ii]):
-                        phots[wdm[ii]]['err_teff'][kk] = 0.
-
+                        #phots[wdm[ii]]['err_teff'][kk] = np.nan
+                        pass
                     else:
                         rand = np.random.normal(size=(nmc,2))
                         clr_mc = color_in[wdm[ii]] + rand[:,0]*err_color_in[wdm[ii]]
                         mag_mc = mag_in[wdm[ii]] + rand[:,1]*err_mag_in[wdm[ii]]
 
-                        logt_mc = griddata((clr_grid, mag_grid), logt_grid, (clr_mc, mag_mc), fill_value=-999.)
+                        logt_mc = griddata((clr_grid, mag_grid), logt_grid, (clr_mc, mag_mc), fill_value=np.nan)
                         wgood = np.where( (10**logt_mc >= 3000.) & (10**logt_mc <= 10000) )[0]
 
                         print(len(wgood))
@@ -612,14 +625,14 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                             phots[wdm[ii]]['err_teff_arr'][kk][mm] = 10**logt_mc[mm]
 
                     if np.isnan(logg_i[ii]):
-                        phots[wdm[ii]]['err_logg'][kk] = 0.
-
+                        #phots[wdm[ii]]['err_logg'][kk] = np.nan
+                        pass
                     else:
                         rand = np.random.normal(size=(nmc,2))
                         clr_mc = color_in[wdm[ii]] + rand[:,0]*err_color_in[wdm[ii]]
                         mag_mc = mag_in[wdm[ii]] + rand[:,1]*err_mag_in[wdm[ii]]
 
-                        logg_mc = griddata((clr_grid, mag_grid), logg_grid, (clr_mc, mag_mc), fill_value=-999.)
+                        logg_mc = griddata((clr_grid, mag_grid), logg_grid, (clr_mc, mag_mc), fill_value=np.nan)
                         wgood = np.where( (logg_mc >= -2.) & (logg_mc <= 7.) )[0]
 
                         if len(wgood) > 2:
