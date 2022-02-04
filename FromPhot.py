@@ -22,7 +22,7 @@ import sys
 import os
 
 def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec', filter='VI',
-             dm=None, ddm=None, extrap=True, enforce_bounds=False, age=None, check_agb=False,
+             dm=None, ddm=None, extrap=True, enforce_bounds=True, age=None, check_agb=False,
              root=os.getcwd()):
 
     """
@@ -451,7 +451,7 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
             #Extrapolate blueward of the bluest isochrone ONLY for Teff and Logg
             #Use interp2d for these points ONLY since it is less robust than griddata
-            if len(feh_i[out_of_bounds]) > 0:
+            if (len(feh_i[out_of_bounds]) > 0) and (not enforce_bounds):
 
                 #Identify indices for points that are out of bounds
                 arg = np.arange(0, len(feh_i))[out_of_bounds]
@@ -516,45 +516,6 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                     t_i[ll] = 10**logt_l
                     L_i[ll] = 10**logL_l
 
-            if enforce_bounds:
-
-                #If using a mixed RGB and AGB grid for all stars
-                if check_agb:
-
-                    feh_grid_mins = np.array([feh_grid_agb.min() if wagb_dm[vv] else feh_grid.min()\
-                                     for vv in range(len(feh_i))])
-                    logt_grid_mins = np.array([logt_grid_agb.min() if wagb_dm[vv] else logt_grid.min()\
-                                     for vv in range(len(feh_i))])
-                    logg_grid_mins = np.array([logg_grid_agb.min() if wagb_dm[vv] else logg_grid.min()\
-                                     for vv in range(len(feh_i))])
-                    logL_grid_mins = np.array([logL_grid_agb.min() if wagb_dm[vv] else logL_grid.min()\
-                                     for vv in range(len(feh_i))])
-
-                    feh_grid_maxs = np.array([feh_grid_agb.max() if wagb_dm[vv] else feh_grid.max()\
-                                     for vv in range(len(feh_i))])
-                    logt_grid_maxs = np.array([logt_grid_agb.max() if wagb_dm[vv] else logt_grid.max()\
-                                     for vv in range(len(feh_i))])
-                    logg_grid_maxs = np.array([logg_grid_agb.max() if wagb_dm[vv] else logg_grid.max()\
-                                     for vv in range(len(feh_i))])
-                    logL_grid_maxs = np.array([logL_grid_agb.max() if wagb_dm[vv] else logL_grid.max()\
-                                     for vv in range(len(feh_i))])
-
-                #If using just an RGB grid
-                else:
-
-                    feh_grid_mins = np.full(len(feh_i), feh_grid.min())
-                    feh_grid_maxs = np.full(len(feh_i), feh_grid.max())
-
-                    logt_grid_mins = np.full(len(feh_i), logt_grid.min())
-                    logt_grid_maxs = np.full(len(feh_i), logt_grid.max())
-
-                    logg_grid_mins = np.full(len(feh_i), logg_grid.min())
-                    logg_grid_maxs = np.full(len(feh_i), logg_grid.max())
-
-                    logL_grid_mins = np.full(len(feh_i), logL_grid.min())
-                    logL_grid_maxs = np.full(len(feh_i), logL_grid.max())
-
-
                 w = np.where( (feh_i < feh_grid_mins) | (feh_i > feh_grid_maxs) )[0]
                 if len(w) > 0:
                     feh_i[w] = np.nan
@@ -579,8 +540,6 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                 phots[wdm[iw]]['logg'][kk] = logg_i[iw]
                 phots[wdm[iw]]['L'][kk] = L_i[iw]
 
-            ### NOTE THAT CURRENTLY ERROR CALCULATION IS NOT IMPLEMENTED FOR AGB STARS
-
             #if err_mag_in.all() != 0. and err_color_in.all() != 0.:
             if (err_mag_in is not None) and (err_color_in is not None):
                 for ii in range(len(wdm)):
@@ -596,7 +555,15 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                         clr_mc = color_in[wdm[ii]] + rand[:,0]*err_color_in[wdm[ii]]
                         mag_mc = mag_in[wdm[ii]] + rand[:,1]*err_mag_in[wdm[ii]]
 
-                        feh_mc = griddata((clr_grid, mag_grid), feh_grid, (clr_mc, mag_mc), fill_value=np.nan)
+                        if check_agb:
+                            if wagb_dm[ii]:
+                                feh_mc = griddata((clr_grid_agb, mag_grid_agb), feh_grid_agb, (clr_mc, mag_mc), fill_value=np.nan)
+                            else:
+                                feh_mc = griddata((clr_grid, mag_grid), feh_grid, (clr_mc, mag_mc), fill_value=np.nan)
+
+                        else:
+                            feh_mc = griddata((clr_grid, mag_grid), feh_grid, (clr_mc, mag_mc), fill_value=np.nan)
+
                         wgood = np.where( (feh_mc >= -5.) & (feh_mc <= 2.) )[0]
 
                         if len(wgood) > 2:
@@ -612,7 +579,15 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                         clr_mc = color_in[wdm[ii]] + rand[:,0]*err_color_in[wdm[ii]]
                         mag_mc = mag_in[wdm[ii]] + rand[:,1]*err_mag_in[wdm[ii]]
 
-                        logt_mc = griddata((clr_grid, mag_grid), logt_grid, (clr_mc, mag_mc), fill_value=np.nan)
+                        if check_agb:
+                            if wagb_dm[ii]:
+                                logt_mc = griddata((clr_grid_agb, mag_grid_agb), logt_grid_agb, (clr_mc, mag_mc), fill_value=np.nan)
+                            else:
+                                logt_mc = griddata((clr_grid, mag_grid), logt_grid, (clr_mc, mag_mc), fill_value=np.nan)
+
+                        else:
+                            logt_mc = griddata((clr_grid, mag_grid), logt_grid, (clr_mc, mag_mc), fill_value=np.nan)
+
                         wgood = np.where( (10**logt_mc >= 3000.) & (10**logt_mc <= 10000) )[0]
 
                         print(len(wgood))
@@ -632,7 +607,15 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
                         clr_mc = color_in[wdm[ii]] + rand[:,0]*err_color_in[wdm[ii]]
                         mag_mc = mag_in[wdm[ii]] + rand[:,1]*err_mag_in[wdm[ii]]
 
-                        logg_mc = griddata((clr_grid, mag_grid), logg_grid, (clr_mc, mag_mc), fill_value=np.nan)
+                        if check_agb:
+                            if wagb_dm[ii]:
+                                logg_mc = griddata((clr_grid_agb, mag_grid_agb), logg_grid_agb, (clr_mc, mag_mc), fill_value=np.nan)
+                            else:
+                                logg_mc = griddata((clr_grid, mag_grid), logg_grid, (clr_mc, mag_mc), fill_value=np.nan)
+
+                        else:
+                            logg_mc = griddata((clr_grid, mag_grid), logg_grid, (clr_mc, mag_mc), fill_value=np.nan)
+
                         wgood = np.where( (logg_mc >= -2.) & (logg_mc <= 7.) )[0]
 
                         if len(wgood) > 2:
