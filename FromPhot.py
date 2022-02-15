@@ -104,7 +104,7 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
     if check_agb: print('CHECK_AGB == TRUE. Using BOTH RGB and AGB isochrones as appropriate')
 
-    if kind == 'parsec': Zsun = 0.0152
+    #if kind == 'parsec': Zsun = 0.0152
 
     if isinstance(mag_in, list) or isinstance(mag_in, np.ndarray):
         pass
@@ -170,20 +170,18 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
         if filter.lower() == 'cfht':
             usecols = (0,1,4,5,6,7,24,26)
-            skiprows = 8
+            skiprows = 0
         if filter.lower() == '2mass':
             usecols = (0,1,5,6,7,23,25)
-            skiprows = 8
+            skiprows = 0
         if filter.lower() == 'vi':
             #for old version CMD input form v3.1
             #usecols = (0,1,4,5,6,7,25,27)
-            #skiprows = 8
             usecols = (0,2,6,7,8,9,30,32)
             skiprows = 0
         if filter.lower() == 'hstacswfc':
             #usecols = (0,2,6,7,8,9,26,35) CMD v3.3
-            #skiprows = 12
-            usecols = (0,2,6,7,8,9,29,34)
+            usecols = (1,2,6,7,8,9,29,34)
             skiprows = 0
 
     if check_agb: #If this flag is set to true, check where given stars are AGB stars assuming 12 Gyr RGB isocrhones
@@ -191,16 +189,16 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
         wagb_in = np.full((nages, n), False)
         for kk,rgb_file in enumerate(iso_files):
 
-            Zi,_,_,_,_,label, mag_blue, mag_red = np.loadtxt(rgb_file,
+            mh,_,_,_,_,label, mag_blue, mag_red = np.loadtxt(rgb_file,
                                                 skiprows=skiprows, unpack=True,usecols=usecols)
 
-            Zi_uniq = np.unique(Zi)
+            mh_uniq = np.unique(mh)
             mag_trgb = []
             color_trgb = []
 
-            for ii in range(len(Zi_uniq)):
+            for ii in range(len(mh_uniq)):
 
-                wrgb = (label == 3) & (Zi == Zi_uniq[ii])
+                wrgb = (label == 3) & (mh == mh_uniq[ii])
                 mag_trgb.append( mag_red[wrgb][-1] ) # IN ABSOLUTE MAGS
                 color_trgb.append( mag_blue[wrgb][-1] - mag_red[wrgb][-1] )
 
@@ -237,21 +235,22 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
             #Now build up the AGB grid independently of the RGB grid because need to assume 0.5 Gyr age
             agb_file = 'isochrones/agb/feh_'+filter+'_05_'+kind+'.dat'
-            Zi, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(os.path.join(root,agb_file),
+            mh, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(os.path.join(root,agb_file),
                                                                 skiprows=skiprows, unpack=True,
                                                                 usecols=usecols)
 
-            Zi_uniq = np.unique(Zi)
+            mh_uniq = np.unique(mh)
             mag_grid_agb = []; clr_grid_agb = []; feh_grid_agb = []
             logt_grid_agb = []; logg_grid_agb = []; logL_grid_agb = []
 
-            for ii in range(len(Zi_uniq)):
+            for ii in range(len(mh_uniq)):
 
-                wagb = (label == 7) & (Zi == Zi_uniq[ii])
+                wagb = (label == 7) & (mh == mh_uniq[ii])
 
                 mag = mag_red[wagb]
                 color = mag_blue[wagb]-mag_red[wagb]
-                feh = np.log10(Zi[wagb]/Zsun)
+                #feh = np.log10(Zi[wagb]/Zsun)
+                feh = mh[wagb]
                 grav = logg[wagb]
                 teff = Te[wagb]
                 lum = logL[wagb]
@@ -313,7 +312,7 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
     for kk,rgb_file in enumerate(iso_files):
 
-        Zi, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(rgb_file,
+        mh, age, logL, Te, logg, label, mag_blue, mag_red = np.loadtxt(rgb_file,
                                                                          skiprows=skiprows, unpack=True,
                                                                          usecols=usecols)
         if filter == 'hstacswfc' or filter.lower() == 'vi':
@@ -326,7 +325,7 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
         if not os.path.exists(os.path.join(root,rgb_save_file)):
 
-            feh_val = np.unique(Zi)
+            feh_val = np.unique(mh)
 
             print(kind.upper()+' isochrone set using '+filter.upper()+' filter, assuming age = '+\
             str( np.round( np.unique(age)[0]/1.e9, decimals=0) )+' Gyr')
@@ -336,11 +335,12 @@ def from_phot(mag_in, color_in, err_mag_in=None, err_color_in=None, kind='parsec
 
             for ii in range(len(feh_val)):
 
-                wrgb = (label == 3) & (Zi == feh_val[ii])
+                wrgb = (label == 3) & (mh == feh_val[ii])
 
                 mag = mag_red[wrgb]
                 color = mag_blue[wrgb]-mag_red[wrgb]
-                feh = np.log10(Zi[wrgb]/Zsun)
+                #feh = np.log10(Zi[wrgb]/Zsun)
+                feh = mh[wrgb]
                 grav = logg[wrgb]
                 teff = Te[wrgb]
                 lum = logL[wrgb]
