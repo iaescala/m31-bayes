@@ -120,8 +120,8 @@ def measure_ew(wvl, spec, ivar,
             continue
 
         nsig = 0.2
-        medb = np.median( nsig * ivar[wb]**(-0.5) )
-        medr = np.median( nsig * ivar[wr]**(-0.5) )
+        medb = np.nanmedian( nsig * ivar[wb]**(-0.5) )
+        medr = np.nanmedian( nsig * ivar[wr]**(-0.5) )
 
         if line_i == 'cat' or line_i == 'na':
 
@@ -144,8 +144,8 @@ def measure_ew(wvl, spec, ivar,
 
         else:
 
-            wmin = wb[np.max(ww1)]
-            wmax = wr[np.min(ww2)]
+            wmin = wb[np.nanmax(ww1)]
+            wmax = wr[np.nanmin(ww2)]
 
             lambdamin = wvl[wmin]
             lambdamax = wvl[wmax]
@@ -153,7 +153,7 @@ def measure_ew(wvl, spec, ivar,
         win = np.where( (wvl >= lambdamin) & (wvl <= lambdamax ) )[0]
 
         if len(win) < 5:
-            sys.stderr.write('Insufficient number of lines to measure for line '+str(linelist['wvl'][k])+'\n')
+            sys.stderr.write('Insufficient number of points to measure for line '+str(linelist['wvl'][k])+'\n')
             continue
 
         ivartemp = ivar[win]
@@ -168,7 +168,7 @@ def measure_ew(wvl, spec, ivar,
         specmin = np.nanmin(spectemp)
         specmax = np.nanmax(spectemp)
 
-        lambdamid = np.median(lambdatemp)
+        lambdamid = np.nanmedian(lambdatemp)
         lambdatemp -= lambdamid
 
         lambda0 = linelist['wvl'][k] - lambdamid
@@ -192,7 +192,7 @@ def measure_ew(wvl, spec, ivar,
                              str(linelist['wvl'][k])+'\n')
                 continue
 
-            ew = 1.e3 * p[1] * (np.pi * p[2]) #units of mA
+            ew = 1.e3 * p[1] * (np.pi * p[2]) #units of mA, a0 = A/(pi gamma)
 
             model = lorentzian(lambdatemp, p[0], p[1], p[2])
 
@@ -208,7 +208,7 @@ def measure_ew(wvl, spec, ivar,
                              str(linelist['wvl'][k])+'\n')
                 continue
 
-            ew = 1.e3 * p[1] * (p[2] * np.sqrt( 2. * np.pi ))
+            ew = 1.e3 * p[1] * (p[2] * np.sqrt( 2. * np.pi )) #a0 = A/sqrt(2 pi sigma^2)
 
             model = gaussian(lambdatemp, p[0], p[1], p[2])
 
@@ -227,7 +227,7 @@ def measure_ew(wvl, spec, ivar,
                              str(linelist['wvl'][k])+'\n')
                 continue
 
-            ew = 1.e3 * p[1] * (np.sqrt(2*np.pi) * p[3] )
+            ew = 1.e3 * p[1] * (np.sqrt(2*np.pi) * p[3] ) #a0 = A/sqrt(2 pi sigma^2)
 
             model = voigt(lambdatemp, p[0], p[1], p[2], p[3])
 
@@ -243,8 +243,6 @@ def measure_ew(wvl, spec, ivar,
             species.append(linelist['species'][k])
 
             ews[k] = ew
-
-            return lambdas, species, ews
 
         if fittype != 'numerical':
 
@@ -313,13 +311,17 @@ def measure_ew(wvl, spec, ivar,
 
             #ewerr = np.nanstd(ewerr)
             ewerr = (ewerr_u + ewerr_l)/2.
+            ew = q2
 
             params[k] = p
             ews[k] = ew
             ewerrs[k] = ewerr
             chis[k] = chi
 
-            return lambdas, species, params, ews, ewerrs, chis
+    if fit_type != 'numerical':
+        return lambdas, species, params, ews, ewerrs, chis
+    else:
+        return lambdas, species, ews
 
 
 def call_measure_ew(wvl, spec, ivar, line_i, fittype='gauss'):
